@@ -30,4 +30,5 @@ void read_mf_dev_id_code(spi_inst_t *spi, uint cs_pin, uint8_t *read_buf);
 void read_unique_id_code(spi_inst_t *spi, uint cs_pin, uint8_t *read_buf);
 void read_status_reg(spi_inst_t *spi, uint cs_pin, uint8_t *read_buf, uint8_t status_reg);
 void read_data(spi_inst_t *spi, uint cs_pin, uint8_t *read_buf, size_t read_len, uint8_t *addr);
+void sector_erase(spi_inst_t *spi, uint cs_pin, uint8_t *addr);
 void write_data(spi_inst_t *spi, uint cs_pin, uint8_t *write_buf, size_t write_len, uint8_t *addr);

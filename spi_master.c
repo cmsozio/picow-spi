@@ -67,6 +67,30 @@ void read_data(spi_inst_t *spi, uint cs_pin, uint8_t *read_buf, size_t read_len,
     spi_read(spi, cs_pin, write_buf, read_buf, 4, read_len);
 }
 
+void sector_erase(spi_inst_t *spi, uint cs_pin, uint8_t *addr) {
+    // Send write enable command
+    uint8_t we[1] = {WRITE_ENABLE};
+    spi_write(spi, cs_pin, we, 1);
+
+    uint8_t current_status[1];
+
+    read_status_reg(spi, cs_pin, current_status, READ_STAT_REG_1);
+    if (current_status[0] & WRITE_ENABLE_LATCH) {
+        uint8_t sector_erase_buf[4] = {SECTOR_ERASE, addr[0], addr[1], addr[2]};
+        spi_write(spi, cs_pin, sector_erase_buf, 4);
+    }
+    
+    // Wait until write in progress is low
+    read_status_reg(spi, cs_pin, current_status, READ_STAT_REG_1);
+    while (current_status[0] & WRITE_IN_PROGRESS) {
+        read_status_reg(spi, cs_pin, current_status, READ_STAT_REG_1);
+    }
+    
+    // Disable any further writes
+    we[0] = WRITE_DISABLE;
+    spi_write(spi, cs_pin, we, 1);
+}
+
 void write_data(spi_inst_t *spi, uint cs_pin, uint8_t *write_buf, size_t write_len, uint8_t *addr) {
     // Calculate full length => page_program command + 3 address bytes + write_buf length
     size_t full_write_len = 4 + write_len;
@@ -83,25 +107,13 @@ void write_data(spi_inst_t *spi, uint cs_pin, uint8_t *write_buf, size_t write_l
     }
 
     uint8_t current_status[1];
+    uint8_t we[1] = {WRITE_ENABLE};
 
     // Ensure write length is smaller than a page (256 bytes)
     if (write_len < 256) {
-        // Send write enable command
-        uint8_t we[1] = {WRITE_ENABLE};
-        spi_write(spi, cs_pin, we, 1);
 
         // Erase the sector
-        read_status_reg(spi, cs_pin, current_status, READ_STAT_REG_1);
-        if (current_status[0] & WRITE_ENABLE_LATCH) {
-            uint8_t sector_erase_buf[4] = {SECTOR_ERASE, addr[0], addr[1], addr[2]};
-            spi_write(spi, cs_pin, sector_erase_buf, 4);
-        }
-
-        // Wait until write in progress is low
-        read_status_reg(spi, cs_pin, current_status, READ_STAT_REG_1);
-        while (current_status[0] & WRITE_IN_PROGRESS) {
-            read_status_reg(spi, cs_pin, current_status, READ_STAT_REG_1);
-        }
+        sector_erase(spi, cs_pin, addr);
 
         // Re-enable the write enable
         spi_write(spi, cs_pin, we, 1);

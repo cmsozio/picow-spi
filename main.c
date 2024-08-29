@@ -4,6 +4,16 @@
 #include "hardware/spi.h"
 #include "spi_master.h"
 
+#define UART_ID uart0
+#define BAUD_RATE 115200
+#define DATA_BITS 8
+#define STOP_BITS 1
+#define PARITY    UART_PARITY_NONE
+
+// We are using pins 0 and 1, but see the GPIO function select table in the
+// datasheet for information on which other pins can be used.
+#define UART_TX_PIN 0
+#define UART_RX_PIN 1
 void printbuf(uint8_t buf[], size_t len) {
     size_t i;
     for (i = 0; i < len; ++i) {
@@ -19,9 +29,94 @@ void printbuf(uint8_t buf[], size_t len) {
     }
 }
 
+static int data_rec = 0;
+uint8_t prog_data[256];
+uint8_t prog_addr[3];
+uint8_t operation;
+
+// RX interrupt handler
+void on_uart_rx() {
+    while (uart_is_readable(UART_ID)) {
+        uint8_t ch = uart_getc(UART_ID);
+
+        switch (operation) {
+            case 0: 
+                if (ch > 0 && ch < 2) {
+                    operation = ch;
+                }
+                break;
+            case 1:
+                if (data_rec < 256) {
+                    prog_data[data_rec] = ch;
+                    data_rec++;
+                } else if (data_rec >= 256 & data_rec < 259) {
+                    prog_addr[data_rec-256] = ch;
+                    data_rec++;
+                } else {
+
+                }
+                break;
+        }
+        /*
+        // Can we send it back?
+        if (uart_is_writable(UART_ID)) {
+            // Change it slightly first!
+            //ch++;
+            uart_putc(UART_ID, ch);
+        }
+        if (chars_rxed < 256) {
+            data[chars_rxed] = ch;
+        }
+        chars_rxed++;
+        if (chars_rxed >= 256) {
+            int count = 0;
+            while (count < 256) {
+                uart_putc(UART_ID, data[count]);
+                count++;
+                printf("\n");
+            }
+            chars_rxed = 0;
+        }
+        }
+        */
+    }
+}
+
+void uart_full_init() {
+    // Set up our UART with a basic baud rate.
+    uart_init(UART_ID, BAUD_RATE);
+
+    // Set the TX and RX pins by using the function select on the GPIO
+    // Set datasheet for more information on function select
+    gpio_set_function(UART_TX_PIN, UART_FUNCSEL_NUM(UART_ID, UART_TX_PIN));
+    gpio_set_function(UART_RX_PIN, UART_FUNCSEL_NUM(UART_ID, UART_RX_PIN));
+
+    // Set UART flow control CTS/RTS, we don't want these, so turn them off
+    uart_set_hw_flow(UART_ID, false, false);
+
+    // Set our data format
+    uart_set_format(UART_ID, DATA_BITS, STOP_BITS, PARITY);
+
+    // Turn off FIFO's - we want to do this character by character
+    uart_set_fifo_enabled(UART_ID, false);
+
+    // Set up a RX interrupt
+    // We need to set up the handler first
+    // Select correct interrupt for the UART we are using
+    int UART_IRQ = UART_ID == uart0 ? UART0_IRQ : UART1_IRQ;
+
+    // And set up and enable the interrupt handlers
+    irq_set_exclusive_handler(UART_IRQ, on_uart_rx);
+    irq_set_enabled(UART_IRQ, true);
+
+    // Now enable the UART to send interrupts - RX only
+    uart_set_irq_enables(UART_ID, true, false);
+}
+
 int main() {
     // Enable UART so we can print
     stdio_init_all();
+    uart_full_init();
 #if !defined(spi_default) || !defined(PICO_DEFAULT_SPI_SCK_PIN) || !defined(PICO_DEFAULT_SPI_TX_PIN) || !defined(PICO_DEFAULT_SPI_RX_PIN) || !defined(PICO_DEFAULT_SPI_CSN_PIN)
 #warning spi/spi_master example requires a board with SPI pins
     puts("Default SPI pins were not defined");
@@ -42,6 +137,10 @@ int main() {
 
     // Make the SPI pins available to picotool
     bi_decl(bi_4pins_with_func(PICO_DEFAULT_SPI_RX_PIN, PICO_DEFAULT_SPI_TX_PIN, PICO_DEFAULT_SPI_SCK_PIN, PICO_DEFAULT_SPI_CSN_PIN, GPIO_FUNC_SPI));
+
+    while (1) {
+
+    }
 
     uint8_t in_buf[1];
     read_device_id_code(spi_default, PICO_DEFAULT_SPI_CSN_PIN, in_buf);
@@ -65,7 +164,9 @@ int main() {
     write_data(spi_default, PICO_DEFAULT_SPI_CSN_PIN, data_write, 4, read_address);
     uint8_t data_read_after[4];
     read_data(spi_default, PICO_DEFAULT_SPI_CSN_PIN, data_read_after, 4, read_address);
-
+    sector_erase(spi_default, PICO_DEFAULT_SPI_CSN_PIN, read_address);
+    uint8_t data_read_after_erase[4];
+    read_data(spi_default, PICO_DEFAULT_SPI_CSN_PIN, data_read_after_erase, 4, read_address);
 
     /* UART Transactions */
     printf("SPI Device ID Code: ");
@@ -86,7 +187,12 @@ int main() {
     printbuf(data_write, 4);
     printf("Read Data: ");
     printbuf(data_read_after, 4);
+    printf("Read Data: ");
+    printbuf(data_read_after_erase, 4);
     sleep_ms(10*1000);
     
+    while(1) {
+       tight_loop_contents(); 
+    }
 #endif
 }
